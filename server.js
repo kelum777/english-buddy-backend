@@ -10,11 +10,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 Multer (Render-safe path)
+// 🔥 Render-safe upload folder
 const upload = multer({ dest: "/tmp/" });
 
 /* =========================
-   CHAT ENDPOINT
+   CHAT ENDPOINT (FIXED)
 ========================= */
 app.post("/chat", async (req, res) => {
   try {
@@ -32,7 +32,7 @@ app.post("/chat", async (req, res) => {
           {
             role: "system",
             content:
-              "You are an English teacher. Correct the sentence, explain briefly, and give a score out of 10. Respond ONLY in JSON format: { corrected, explanation, score }",
+              'You are an English teacher. Respond ONLY in strict JSON format like this: {"corrected":"...","explanation":"...","score":8}. Do not add anything else.',
           },
           {
             role: "user",
@@ -44,17 +44,36 @@ app.post("/chat", async (req, res) => {
 
     const data = await response.json();
 
-    const content = data.choices[0].message.content;
+    const content = data.choices?.[0]?.message?.content || "";
 
-    res.json(JSON.parse(content));
+    let parsed;
+
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      console.log("JSON parse failed:", content);
+
+      // fallback if AI returns non-JSON
+      parsed = {
+        corrected: content,
+        explanation: "AI response format issue",
+        score: 5,
+      };
+    }
+
+    res.json(parsed);
   } catch (err) {
     console.error("Chat error:", err);
-    res.status(500).json({ error: "Chat error" });
+    res.status(500).json({
+      corrected: "Error occurred",
+      explanation: "Server error",
+      score: 0,
+    });
   }
 });
 
 /* =========================
-   SPEECH (WHISPER)
+   SPEECH ENDPOINT
 ========================= */
 app.post("/speech", upload.single("audio"), async (req, res) => {
   try {
@@ -85,7 +104,7 @@ app.post("/speech", upload.single("audio"), async (req, res) => {
 });
 
 /* =========================
-   HEALTH CHECK (IMPORTANT)
+   HEALTH CHECK
 ========================= */
 app.get("/", (req, res) => {
   res.send("Backend is running 🚀");
