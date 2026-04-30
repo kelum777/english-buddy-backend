@@ -1,6 +1,8 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import FormData from "form-data";
+import fs from "fs";
 import multer from "multer";
 
 dotenv.config();
@@ -12,7 +14,7 @@ app.use(express.json());
 const upload = multer({ dest: "/tmp/" });
 
 /* =========================
-   CHAT (GOOD ACCURACY)
+   CHAT (FIXED SCORING)
 ========================= */
 app.post("/chat", async (req, res) => {
   try {
@@ -27,7 +29,7 @@ app.post("/chat", async (req, res) => {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o", // ✅ FIXED MODEL
+        model: "gpt-4o", // ✅ correct model
         messages: [
           {
             role: "system",
@@ -36,7 +38,7 @@ You are a professional English teacher.
 
 Your job:
 1. Correct the sentence naturally
-2. Give a short and simple explanation
+2. Give a short and clear explanation
 3. Give a realistic score from 0–100
 
 SCORING RULES:
@@ -46,14 +48,12 @@ SCORING RULES:
 - Minor grammar mistake → 70–85
 - Medium mistake → 50–70
 - Very incorrect → below 50
+- Meaningless/random text → below 40
 
 IMPORTANT:
+- Do NOT give high scores to meaningless text
 - Do NOT give extremely low scores for small mistakes
 - Be fair like a human teacher
-
-Examples:
-"Helo i want to go shopping" → 75–85
-"Hello, I want to go shopping" → 95+
 
 Return ONLY JSON:
 {"corrected":"...","explanation":"...","score":85}
@@ -70,7 +70,7 @@ Return ONLY JSON:
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || "";
 
-    console.log("🤖 Raw:", content);
+    console.log("🤖 Raw AI:", content);
 
     let parsed;
 
@@ -80,19 +80,28 @@ Return ONLY JSON:
       parsed = {
         corrected: content,
         explanation: "Formatting issue",
-        score: 75,
+        score: 70,
       };
     }
 
-    // ✅ SCORE PROTECTION (VERY IMPORTANT)
+    // ✅ Ensure valid score
     if (typeof parsed.score !== "number") {
-      parsed.score = 75;
+      parsed.score = 70;
     }
 
-    // Prevent unrealistic scores
-    parsed.score = Math.max(50, Math.min(parsed.score, 100));
+    // ✅ Clamp score between 0–100
+    parsed.score = Math.min(Math.max(parsed.score, 0), 100);
 
-    console.log("✅ Final:", parsed);
+    // ✅ Detect random / meaningless text
+    if (
+      message.length < 5 ||
+      !/[aeiou]/i.test(message) || // no vowels = likely nonsense
+      /^[a-z\s]+$/i.test(message) === false
+    ) {
+      parsed.score = Math.min(parsed.score, 40);
+    }
+
+    console.log("✅ Final Response:", parsed);
 
     res.json(parsed);
   } catch (err) {
@@ -105,6 +114,54 @@ Return ONLY JSON:
     });
   }
 });
+
+/* =========================
+   SPEECH (UNCHANGED)
+========================= */
+app.post("/speech", upload.single("audio"), async (req, res) => {
+  try {
+    const file = req.file;
+
+    if (!file) {
+      console.log("❌ No file received");
+      return res.json({ text: "" });
+    }
+
+    console.log("📁 File:", file.path);
+
+    const formData = new FormData();
+    formData.append("file", fs.createReadStream(file.path));
+    formData.append("model", "whisper-1");
+
+    const response = await fetch(
+      "https://api.openai.com/v1/audio/transcriptions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          ...formData.getHeaders(),
+        },
+        body: formData,
+      }
+    );
+
+    const raw = await response.text();
+    console.log("🧠 Whisper raw:", raw);
+
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = {};
+    }
+
+    res.json({ text: data.text || "" });
+  } catch (err) {
+    console.error("Speech error:", err);
+    res.json({ text: "" });
+  }
+});
+
 /* ========================= */
 app.get("/", (req, res) => {
   res.send("Backend is running 🚀");
