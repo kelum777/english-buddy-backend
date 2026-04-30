@@ -14,7 +14,7 @@ app.use(express.json());
 const upload = multer({ dest: "/tmp/" });
 
 /* =========================
-   CHAT (FIXED SCORING)
+   CHAT (FINAL SCORING FIX)
 ========================= */
 app.post("/chat", async (req, res) => {
   try {
@@ -29,7 +29,7 @@ app.post("/chat", async (req, res) => {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o", // ✅ correct model
+        model: "gpt-4o",
         messages: [
           {
             role: "system",
@@ -44,16 +44,15 @@ Your job:
 SCORING RULES:
 
 - Perfect sentence → 95–100
-- Small spelling/punctuation mistake → 85–95
+- Small mistake → 85–95
 - Minor grammar mistake → 70–85
 - Medium mistake → 50–70
 - Very incorrect → below 50
-- Meaningless/random text → below 40
+- Random or meaningless text → below 40
 
 IMPORTANT:
-- Do NOT give high scores to meaningless text
-- Do NOT give extremely low scores for small mistakes
-- Be fair like a human teacher
+- If sentence is meaningless, return corrected as "---"
+- Be fair and realistic
 
 Return ONLY JSON:
 {"corrected":"...","explanation":"...","score":85}
@@ -84,21 +83,22 @@ Return ONLY JSON:
       };
     }
 
-    // ✅ Ensure valid score
+    // ✅ Ensure score exists
     if (typeof parsed.score !== "number") {
       parsed.score = 70;
     }
 
-    // ✅ Clamp score between 0–100
+    // ✅ Clamp score 0–100
     parsed.score = Math.min(Math.max(parsed.score, 0), 100);
 
-    // ✅ Detect random / meaningless text
+    // 🔥 FINAL GIBBERISH DETECTION (STRONG FIX)
     if (
-      message.length < 5 ||
-      !/[aeiou]/i.test(message) || // no vowels = likely nonsense
-      /^[a-z\s]+$/i.test(message) === false
+      parsed.corrected === "---" ||
+      parsed.explanation?.toLowerCase().includes("not form a coherent sentence") ||
+      parsed.explanation?.toLowerCase().includes("random") ||
+      message.length < 5
     ) {
-      parsed.score = Math.min(parsed.score, 40);
+      parsed.score = Math.min(parsed.score, 25);
     }
 
     console.log("✅ Final Response:", parsed);
